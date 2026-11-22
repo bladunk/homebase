@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/main'
 import { dayKey, offsetDay, seed, storageKey } from '../src/data'
 import { preferencesKey } from '../src/dashboard-preferences'
-import { v3Key, type Snapshot } from '../src/storage'
+import { v4Key, type Snapshot } from '../src/storage'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let root: Root | undefined
@@ -49,8 +49,8 @@ function select(field: HTMLSelectElement, value: string) {
   })
 }
 
-function v3(): Snapshot {
-  return JSON.parse(localStorage.getItem(v3Key)!)
+function v4(): Snapshot {
+  return JSON.parse(localStorage.getItem(v4Key)!)
 }
 
 function widgetOrder() {
@@ -86,7 +86,7 @@ describe('command center with existing records', () => {
     expect(button('Change bedsheets completed').getAttribute('aria-disabled')).toBe('true')
     expect(target.querySelector('[aria-label="Chores complete: 1 of 3"]')).not.toBeNull()
     click('Complete Wash guest towels')
-    const next = v3().data
+    const next = v4().data
     expect(next.chores[0]).toMatchObject({ ...saved.chores[0], date: offsetDay(today, 7), lastDone: today,
       history: [{ action: 'complete', day: today }] })
     expect(next.chores.slice(1)).toEqual(saved.chores.slice(1))
@@ -96,7 +96,7 @@ describe('command center with existing records', () => {
     unmount()
     mount()
     expect(button('Wash guest towels completed')).toBeTruthy()
-    expect(v3().data).toEqual(next)
+    expect(v4().data).toEqual(next)
   })
 
   it('reorders, hides and styles widgets across reloads while keeping access to their pages', () => {
@@ -133,7 +133,7 @@ describe('command center with existing records', () => {
     click('Move Pantry up')
     click('Cancel')
     expect(localStorage.getItem(preferencesKey)).toBeNull()
-    expect(localStorage.getItem(v3Key)).toBeNull()
+    expect(localStorage.getItem(v4Key)).toBeNull()
     expect(widgetOrder()[0]).toBe('widget-today')
 
     click('Customize')
@@ -176,29 +176,29 @@ describe('command center with existing records', () => {
     expect(target.querySelector('.command-layout')?.getAttribute('data-density')).toBe('expanded')
     expect(target.querySelector('.shell')?.getAttribute('data-texture')).toBe('grid')
     expect(widgetOrder()).not.toContain('widget-attention')
-    expect(v3().data).toEqual(saved)
+    expect(v4().data).toEqual(saved)
   })
 
   it('snoozes and undoes an occurrence through dashboard activity', () => {
     click('Activity for Wash guest towels')
     click('Snooze')
-    expect(v3().data.chores[0].snoozedUntil).toBe(offsetDay(today, 1))
+    expect(v4().data.chores[0].snoozedUntil).toBe(offsetDay(today, 1))
     expect(target.querySelector('#widget-today')?.closest('section')?.textContent).not.toContain('Wash guest towels')
     click('Chores')
     click('Activity for Wash guest towels')
     click('Undo last action')
-    expect(v3().data.chores[0].snoozedUntil).toBeUndefined()
-    expect(v3().data.chores[0].history?.[0].undone).toBe(true)
+    expect(v4().data.chores[0].snoozedUntil).toBeUndefined()
+    expect(v4().data.chores[0].history?.[0].undone).toBe(true)
   })
 
   it('favorites pantry items, adjusts stock, and adds suggested products without duplicates', () => {
     click('Pantry')
     click('Favorite Oat milk')
     click('Increase Oat milk')
-    expect(v3().data.pantry[0]).toMatchObject({ quantity: 2, favorite: true })
+    expect(v4().data.pantry[0]).toMatchObject({ quantity: 2, favorite: true })
     click('Shopping')
     click('Add Coffee beans to list')
-    expect(v3().data.groceries.filter(item => item.name === 'Coffee beans')).toHaveLength(1)
+    expect(v4().data.groceries.filter(item => item.name === 'Coffee beans')).toHaveLength(1)
     expect(target.querySelector('[aria-label="Add Coffee beans to list"]')).toBeNull()
   })
 
@@ -209,10 +209,10 @@ describe('command center with existing records', () => {
     const name = form.elements.namedItem('name') as HTMLInputElement
     const [towels, , vacuum] = form.querySelectorAll<HTMLInputElement>('input[name="chore"]')
     act(() => { name.value = 'Sunday Reset'; towels.click(); vacuum.click(); form.requestSubmit() })
-    expect(v3().data.routines?.[0].choreIds).toEqual(['c1', 'c3'])
+    expect(v4().data.routines?.[0].choreIds).toEqual(['c1', 'c3'])
     const [check] = target.querySelectorAll<HTMLInputElement>('.routine-progress input')
     act(() => check.click())
-    expect(v3().data.chores[0].lastDone).toBe(today)
+    expect(v4().data.chores[0].lastDone).toBe(today)
     expect(target.querySelector('.routine-progress')?.textContent).toContain('1/2 complete today')
     unmount()
     mount()
@@ -228,7 +228,7 @@ describe('command center with existing records', () => {
       (categoryForm.elements.namedItem('name') as HTMLInputElement).value = 'Kitchen'
       categoryForm.requestSubmit()
     })
-    const category = v3().data.categories![0]
+    const category = v4().data.categories![0]
     click('Pantry')
     click('Edit Oat milk')
     const productForm = target.querySelector<HTMLFormElement>('dialog form')!
@@ -236,7 +236,7 @@ describe('command center with existing records', () => {
       (productForm.elements.namedItem('categoryId') as HTMLSelectElement).value = category.id
       productForm.requestSubmit()
     })
-    expect(v3().data.pantry[0].categoryId).toBe(category.id)
+    expect(v4().data.pantry[0].categoryId).toBe(category.id)
     click('Overview')
     click('Customize')
     select(target.querySelector<HTMLSelectElement>('.widget-add select')!, 'activity')
@@ -250,14 +250,14 @@ describe('command center with existing records', () => {
     unmount()
     mount()
     expect(target.querySelector('.command-grid .widget-list')?.textContent).toContain('Oat milk')
-    expect(v3().dashboard.widgets.find(widget => widget.kind === 'activity')?.categoryId).toBe(category.id)
+    expect(v4().dashboard.widgets.find(widget => widget.kind === 'activity')?.categoryId).toBe(category.id)
   })
 
   it('validates a legacy import and keeps the current dashboard customization on restore', async () => {
     click('Customize')
     click('Remove Calendar')
     click('Save dashboard')
-    const layout = v3().dashboard
+    const layout = v4().dashboard
     click('Backup & restore')
     const input = target.querySelector<HTMLInputElement>('input[type="file"]')!
     const importFile = async (text: string) => {
@@ -266,12 +266,12 @@ describe('command center with existing records', () => {
     }
     await importFile('{"version":3}')
     expect(target.querySelector('dialog')).toBeNull()
-    expect(v3().data).toEqual(saved)
+    expect(v4().data).toEqual(saved)
     const replacement = { ...saved, pantry: [] }
     await importFile(JSON.stringify(replacement))
-    expect(v3().data).toEqual(saved)
+    expect(v4().data).toEqual(saved)
     click('Restore backup')
-    expect(v3()).toEqual({ version: 3, data: replacement, dashboard: layout })
+    expect(v4()).toMatchObject({ version: 4, data: replacement, dashboard: layout })
     expect(localStorage.getItem(storageKey)).toBe(JSON.stringify(saved))
   })
 })

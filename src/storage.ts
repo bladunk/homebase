@@ -1,10 +1,14 @@
-import { collections, isDate, isName, isObject, parseBackup, scheduled, seed, storageKey, type State } from './data'
+import { collections, isDate, isName, isObject, parseBackup, scheduled, storageKey, type State } from './data'
 import { categoryColors, displayStyles, hasKey, iconLabels, loadPreferences, mainSection, migratePreferences, textures, themeOptions, widgetDefinitions, type DashboardPreferences } from './dashboard-preferences'
+import { cadences, conditions } from './chore-library'
+import { cleaningModes, defaultSmart, homeTypes, priorityOrder, styles, type SmartPreferences } from './smart-plan'
 import { recurrenceLabels } from './recurrence'
 
 export const v3Key = 'homebase-v3'
 
-export type Snapshot = { version: 3; data: State; dashboard: DashboardPreferences }
+export const v4Key = 'homebase-v4'
+export type Snapshot = { version: 4; data: State; dashboard: DashboardPreferences; smart: SmartPreferences }
+
 
 function validRule(rule: unknown) {
   if (!isObject(rule) || !hasKey(recurrenceLabels, rule.mode)) return false
@@ -45,6 +49,7 @@ function checkData(raw: unknown) {
     (data.routines ?? []).every(row => row.categoryId === undefined || categoryIds.has(row.categoryId))
   const validSchedules = scheduled.every(key => data[key].every(task => validOccurrence(task) &&
     (task.rule === undefined || validRule(task.rule)) &&
+    (task.plan === undefined || validPlan(task.plan)) &&
     (task.history === undefined || (Array.isArray(task.history) && task.history.every(entry =>
       isObject(entry) && ['complete', 'skip', 'snooze'].includes(entry.action) && isDate(entry.day) &&
       validOccurrence(entry.before) && validOccurrence(entry.after) && (entry.undone === undefined || typeof entry.undone === 'boolean'))))))
@@ -83,34 +88,81 @@ function checkDashboard(raw: unknown, data: State) {
   return migratePreferences(raw)
 }
 
-export function readBackup(text: string, currentDashboard: DashboardPreferences): Snapshot {
+function integer(value: unknown, min: number, max: number) {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+}
+
+function validPlan(raw: unknown) {
+  return isObject(raw) && (raw.templateId === undefined || isName(raw.templateId)) &&
+    integer(raw.minutes, 1, 600) && hasKey(priorityOrder, raw.priority) && (raw.cadence === undefined || hasKey(cadences, raw.cadence)) &&
+    typeof raw.flexible === 'boolean'
+}
+
+function checkSmart(raw: unknown): SmartPreferences {
+  if (!isObject(raw) || typeof raw.setupDismissed !== 'boolean' || !isObject(raw.planner) || !isObject(raw.progress)) {
+    throw new Error('The backup is missing V4 planning settings.')
+  }
+  const { answers, planner, progress, lastImport } = raw
+  const validAnswers = answers === undefined || (isObject(answers) && hasKey(homeTypes, answers.home) &&
+    integer(answers.bedrooms, 0, 20) && integer(answers.bathrooms, 0, 20) && integer(answers.occupants, 1, 30) &&
+    hasKey(cleaningModes, answers.cleaning) && Array.isArray(answers.kit) && answers.kit.every(item => hasKey(conditions, item)))
+  const validBreaks = planner.breaks === undefined || (Array.isArray(planner.breaks) && planner.breaks.every(range =>
+    isObject(range) && isDate(range.start) && isDate(range.end) && range.end >= range.start))
+  const validPlanner = validBreaks && integer(planner.budget, 5, 240) && hasKey(styles, planner.style) &&
+    Array.isArray(planner.restDays) && planner.restDays.every(day => integer(day, 0, 6))
+  const validProgress = typeof progress.enabled === 'boolean' && (progress.goal === 3 || progress.goal === 5 || progress.goal === 7)
+  const validImport = lastImport === undefined || (isObject(lastImport) && Array.isArray(lastImport.records) &&
+    lastImport.records.every(row => isObject(row) && isName(row.id) && isName(row.name) && validOccurrence(row) && validPlan(row.plan)))
+  if (!validAnswers || !validPlanner || !validProgress || !validImport) throw new Error('The backup contains invalid V4 planning settings.')
+  return raw as unknown as SmartPreferences
+}
+
+export function readBackup(text: string, currentDashboard: DashboardPreferences, currentSmart = defaultSmart()): Snapshot {
   const raw: unknown = JSON.parse(text)
-  if (isObject(raw) && raw.version === 3) {
+  if (isObject(raw) && (raw.version === 3 || raw.version === 4)) {
     const data = checkData(raw.data)
-    return { version: 3, data, dashboard: checkDashboard(raw.dashboard, data) }
+    const dashboard = checkDashboard(raw.dashboard, data)
+    const smart = raw.version === 4 ? checkSmart(raw.smart) : { ...currentSmart, lastImport: undefined }
+    return { version: 4, data, dashboard, smart }
   }
   const data = checkData(raw)
   const installedCategories = new Set(data.categories?.map(category => category.id))
   const widgets = currentDashboard.widgets.map(widget => widget.categoryId && !installedCategories.has(widget.categoryId)
     ? { ...widget, categoryId: undefined } : widget)
-  return { version: 3, data, dashboard: { ...currentDashboard, widgets } }
+  return { version: 4, data, dashboard: { ...currentDashboard, widgets }, smart: { ...currentSmart, lastImport: undefined } }
 }
 
-export function loadSnapshot(storage: Pick<Storage, 'getItem'>) {
+function readInstalled(storage: Pick<Storage, 'getItem'>, key: string, version: number, dashboard: DashboardPreferences) {
+  const stored = storage.getItem(key)
+  if (stored === null) return undefined
+  const raw: unknown = JSON.parse(stored)
+  if (!isObject(raw) || raw.version !== version) throw new Error('Invalid HomeBase storage version.')
+  return readBackup(stored, dashboard)
+}
+
+export function loadSnapshot(storage: Pick<Storage, 'getItem'>): {
+  snapshot: Snapshot; empty: boolean; error: string; recovery?: Snapshot
+} {
   const dashboard = loadPreferences(storage)
-  const initial: Snapshot = { version: 3, data: seed(), dashboard }
+  const initial: Snapshot = {
+    version: 4, data: { version: 1, chores: [], pantry: [], lists: [], groceries: [], medication: [], vet: [], calendar: [], maintenance: [] },
+    dashboard, smart: defaultSmart(),
+  }
+  function legacy() {
+    const v3 = readInstalled(storage, v3Key, 3, dashboard)
+    if (v3) return v3
+    return readInstalled(storage, storageKey, 1, dashboard)
+  }
   try {
-    const newer = storage.getItem(v3Key)
-    if (newer !== null) {
-      const raw: unknown = JSON.parse(newer)
-      if (!isObject(raw) || raw.version !== 3) throw new Error('Invalid V3 storage.')
-      return { snapshot: readBackup(newer, dashboard), empty: false, error: '' }
-    }
-    const legacy = storage.getItem(storageKey)
-    return { snapshot: legacy === null ? initial : readBackup(legacy, dashboard), empty: legacy === null, error: '' }
+    const saved = readInstalled(storage, v4Key, 4, dashboard) ?? legacy()
+    return { snapshot: saved ?? initial, empty: !saved, error: '' }
   } catch {
-    // Preserve unreadable storage on disk. The sample view is read-only until a valid restore.
-    return { snapshot: initial, empty: false, error: 'HomeBase could not read the saved records. Restore a valid backup to resume editing.' }
+    // An unreadable current snapshot is left untouched until the user confirms a restore.
+    let recovery: Snapshot | undefined
+    try { recovery = legacy() } catch {
+      try { recovery = readInstalled(storage, storageKey, 1, dashboard) } catch { /* No readable legacy copy. */ }
+    }
+    return { snapshot: initial, empty: false, recovery, error: 'HomeBase could not read the saved records. Restore a valid backup to resume editing.' }
   }
 }
 

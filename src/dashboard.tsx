@@ -3,6 +3,7 @@ import { Bell, CalendarDays, Check, ClipboardList, Clock, Coffee, Ellipsis, Hear
 import { collections, formatDay, type Collection, type RecordItem, type Schedule, type ScheduledCollection, type State } from './data'
 import { widgetDefinitions, type DashboardPreferences, type WidgetPreference } from './dashboard-preferences'
 import { expirationStatus, isLowStock } from './inventory'
+import { onDemand } from './smart-plan'
 import { dueDate, isActive } from './recurrence'
 
 const icons = {
@@ -69,7 +70,7 @@ function DashboardWidget({ widget, state, today, preferences, due, upcoming, go,
   const metric = widget.style === 'metric'
   const low = state.pantry.filter(isLowStock)
   const checked = state.groceries.filter(item => item.done).length
-  const dueChores = (task: Schedule) => isActive(task) && dueDate(task) <= today
+  const dueChores = (task: Schedule) => isActive(task) && !onDemand(task) && dueDate(task) <= today
   const choreRows = state.chores.filter(task => dueChores(task) || task.lastDone === today)
   const choreIsDone = (task: Schedule) => task.lastDone === today && !dueChores(task)
 
@@ -219,7 +220,7 @@ function QuickTask({ task, today, done, complete, edit, activity }: {
     <button className="quick-check" type="button" aria-label={done ? task.name + ' completed' : 'Complete ' + task.name}
       aria-disabled={done || undefined} onClick={() => { if (!done) complete() }}><Check size={16} aria-hidden="true" /></button>
     <button className="quick-edit" type="button" aria-label={'Edit ' + task.name} onClick={edit}>
-      <span>{task.name}</span>{!done && dueDate(task) < today && <small>Overdue</small>}
+      <span>{task.name}</span>{!done && !onDemand(task) && dueDate(task) < today && <small>Overdue</small>}
     </button>
     <button className="icon-button quick-activity" type="button" aria-label={'Activity for ' + task.name} onClick={activity}><Ellipsis size={17} /></button>
   </li>

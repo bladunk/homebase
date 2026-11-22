@@ -1,3 +1,4 @@
+import { onDemand, scheduleLabel } from './smart-plan'
 import { dayKey, isDate, offsetDay, type Schedule } from './data'
 
 export const recurrenceLabels = {
@@ -19,11 +20,11 @@ export function dueDate(task: Schedule) {
 }
 
 export function isActive(task: Schedule) {
-  return taskRule(task).mode !== 'once' || (!task.lastDone && !task.skipped)
+  return onDemand(task) || taskRule(task).mode !== 'once' || (!task.lastDone && !task.skipped)
 }
 
 export function canComplete(task: Schedule, today: string) {
-  return isActive(task) && (task.lastDone !== today || task.date <= today)
+  return isActive(task) && (onDemand(task) || task.lastDone !== today || task.date <= today)
 }
 
 function weekday(date: string) {
@@ -66,6 +67,12 @@ function nextDate(task: Schedule, today: string, action: TaskAction) {
   }
 }
 
+export function forecastNext(task: Schedule, assumedCompletion: string) {
+  if (onDemand(task) || taskRule(task).mode === 'once') return undefined
+  const next = nextDate(task, assumedCompletion, 'complete')
+  return isDate(next) ? next : undefined
+}
+
 function occurrence(task: Schedule): Occurrence {
   return { date: task.date, lastDone: task.lastDone, snoozedUntil: task.snoozedUntil, skipped: task.skipped }
 }
@@ -75,12 +82,12 @@ function equals(a: Occurrence, b: Occurrence) {
 }
 
 export function applyTaskAction(task: Schedule, action: TaskAction, today: string, until?: string): Schedule {
-  if (!isActive(task)) return task
+  if (!isActive(task) || (onDemand(task) && action !== 'complete')) return task
   if (action === 'snooze' && (!isDate(until) || until <= today || until <= dueDate(task))) return task
   if (action === 'complete' && !canComplete(task, today)) return task
   const before = occurrence(task)
   const after: Occurrence = action === 'snooze' ? { ...before, snoozedUntil: until } : {
-    date: nextDate(task, today, action),
+    date: onDemand(task) ? today : nextDate(task, today, action),
     lastDone: action === 'complete' ? today : task.lastDone,
     skipped: action === 'skip' && taskRule(task).mode === 'once' ? true : undefined,
   }
@@ -108,6 +115,7 @@ export function undoTask(task: Schedule): Schedule {
 }
 
 export function ruleDescription(task: Schedule) {
+  if (onDemand(task)) return scheduleLabel(task) ?? 'As needed'
   const rule = taskRule(task)
   if (rule.mode === 'interval' || rule.mode === 'completion') {
     return 'Every ' + rule.days + (rule.days === 1 ? ' day' : ' days') + (rule.mode === 'completion' && task.rule ? ' after completion' : '')

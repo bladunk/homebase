@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { CalendarDays, ClipboardList, ChevronLeft, ChevronRight, Download, House, Ellipsis, PackageOpen, PawPrint, Pencil, Plus, ShoppingBasket, Sparkles, Tag, Trash2, Upload, Wrench, X } from 'lucide-react'
+import { BookOpen, CalendarDays, ClipboardList, ChevronLeft, ChevronRight, Download, House, Ellipsis, Medal, PackageOpen, PawPrint, Pencil, Plus, ShoppingBasket, Sparkles, Tag, Trash2, Upload, Wrench, X } from 'lucide-react'
 import { collections, dayKey, formatDay, isDate, offsetDay, scheduled, type Category, type Collection, type Event, type Grocery, type Pantry, type RecordItem, type Routine, type Schedule, type ScheduledCollection, type State } from './data'
 import { CategoryIcon, Dashboard } from './dashboard'
 import { CustomizeDashboard } from './customizer'
@@ -7,10 +7,15 @@ import { defaultWidget, themeOptions, type DashboardPreferences } from './dashbo
 import { CategoryEditor, CategorySelect, CategoryTag, InventoryRow, RoutineEditor, RoutineProgress, TaskActivity, TaskCheck } from './household-tools'
 import { isLowStock, suggestedItems } from './inventory'
 import { applyTaskAction, dueDate, isActive, recurrenceLabels, ruleDescription, taskRule, undoTask, type RecurrenceMode, type Rule, type TaskAction } from './recurrence'
-import { inaccessibleSnapshot, loadSnapshot, readBackup, v3Key, type Snapshot } from './storage'
+import { inaccessibleSnapshot, loadSnapshot, readBackup, v4Key, type Snapshot } from './storage'
+import { ChoreLibrary, SetupWizard, SmartShortcuts, StartHere, TaskSearch, TemplateDetails } from './smart-setup'
+import { ProgressView, TodayView } from './smart-today'
+import { estimatedMinutes, importSuggestions, onDemand, undoImport, type Answers, type PlanSettings, type SmartPreferences, type Suggestion } from './smart-plan'
+import { templateById } from './chore-library'
 import './style.css'
 import './command-center.css'
 import './v3.css'
+import './smart.css'
 
 const navigation = [
   { id: 'dashboard', label: 'Overview', icon: House },
@@ -21,6 +26,10 @@ const navigation = [
   { id: 'calendar', label: 'Calendar', widget: 'calendar' },
   { id: 'maintenance', label: 'Maintenance', widget: 'maintenance' },
   { id: 'routines', label: 'Routines', widget: 'routines' },
+  { id: 'today', label: 'Today', icon: CalendarDays },
+  { id: 'setup', label: 'Guided setup', icon: Sparkles },
+  { id: 'library', label: 'Chore library', icon: BookOpen },
+  { id: 'progress', label: 'Progress', icon: Medal },
   { id: 'categories', label: 'Categories', icon: Tag },
   { id: 'backup', label: 'Backup & restore', icon: Download },
 ] as const
@@ -41,6 +50,8 @@ const subtitles: Record<Page, string> = {
   shopping: 'Keep separate lists for each kind of shopping trip.', dog: 'Keep medication schedules and vet visits in one place.',
   calendar: 'See household events and scheduled tasks together.', maintenance: 'Keep track of appliance care and service dates.',
   routines: 'Reuse groups of chores and track what’s done today.', categories: 'Organize household records by activity.',
+  today: 'See what’s due and make a plan for the week.', setup: 'Create a starter chore schedule for your household.',
+  library: '', progress: '',
   backup: 'Download a copy of your household data or import a backup.',
 }
 
@@ -51,7 +62,8 @@ export function App() {
   })
   const [snapshot, setSnapshot] = useState(initial.snapshot)
   const snapshotRef = useRef(snapshot)
-  const { data: state, dashboard: preferences } = snapshot
+  const { data: state, dashboard: preferences, smart } = snapshot
+  const [recovery, setRecovery] = useState(initial.recovery)
   const [notice, setNotice] = useState('')
   const [storageError, setStorageError] = useState(initial.error)
   const readError = useRef(initial.error)
@@ -66,6 +78,7 @@ export function App() {
   const [taskPanel, setTaskPanel] = useState<{ collection: ScheduledCollection; id: string }>()
   const [routineEditor, setRoutineEditor] = useState<Routine | 'new'>()
   const [categoryEditor, setCategoryEditor] = useState<Category | 'new'>()
+  const [choreSearch, setChoreSearch] = useState('')
   const [pantryFilter, setPantryFilter] = useState('all')
   const [suggestionList, setSuggestionList] = useState('')
   const [today, setToday] = useState(dayKey)
@@ -96,15 +109,16 @@ export function App() {
   }, [])
   useEffect(() => {
     try {
-      if (initial.empty && localStorage.getItem(v3Key) === null) localStorage.setItem(v3Key, JSON.stringify(initial.snapshot))
+      if (initial.empty && localStorage.getItem(v4Key) === null) localStorage.setItem(v4Key, JSON.stringify(initial.snapshot))
     } catch {
       setStorageError('This browser could not save HomeBase data.')
     }
     const synchronize = (event: StorageEvent) => {
-      if (event.key !== v3Key && event.key !== null) return
+      if (event.key !== v4Key && event.key !== null) return
       const loaded = loadSnapshot(window.localStorage)
       readError.current = loaded.error
       setStorageError(loaded.error)
+      setRecovery(loaded.recovery)
       if (!loaded.error) {
         snapshotRef.current = loaded.snapshot
         setSnapshot(loaded.snapshot)
@@ -117,9 +131,10 @@ export function App() {
   function writeSnapshot(next: Snapshot, message: string, restoring = false) {
     if (readError.current && !restoring) return false
     try {
-      localStorage.setItem(v3Key, JSON.stringify(next))
+      localStorage.setItem(v4Key, JSON.stringify(next))
       snapshotRef.current = next
       setSnapshot(next)
+      setRecovery(undefined)
       readError.current = ''
       setStorageError('')
       setNotice(message)
@@ -141,6 +156,37 @@ export function App() {
   function savePreferences(next: DashboardPreferences) {
     if (writeSnapshot({ ...snapshotRef.current, dashboard: next }, 'Dashboard saved.')) closeCustomizer()
     else setPreferenceError('Dashboard preferences could not be saved. Check device storage or restore a valid backup.')
+  }
+
+  function saveSmart(changes: Partial<SmartPreferences>, message: string) {
+    const current = snapshotRef.current
+    return writeSnapshot({ ...current, smart: { ...current.smart, ...changes } }, message)
+  }
+
+  function finishSetup(rows: Suggestion[], answers?: Answers, planner?: PlanSettings) {
+    const current = snapshotRef.current
+    const { data, records } = importSuggestions(rows, current.data, () => crypto.randomUUID())
+    const next = {
+      ...current, data, smart: { ...current.smart, setupDismissed: true,
+        answers: answers ?? current.smart.answers, planner: planner ?? current.smart.planner,
+        lastImport: records.length ? { records } : current.smart.lastImport },
+    }
+    if (!records.length && !answers) { setNotice('That chore is already in HomeBase.'); return false }
+    const message = records.length ? records.length + (records.length === 1 ? ' chore added.' : ' chores added.') : 'Setup preferences saved.'
+    if (!writeSnapshot(next, message)) return false
+    if (answers) {
+      go('chores')
+      setNotice(message)
+    }
+    return true
+  }
+
+  function undoSetupImport() {
+    const current = snapshotRef.current
+    if (!current.smart.lastImport) return
+    const { data, removed } = undoImport(current.data, current.smart.lastImport.records)
+    writeSnapshot({ ...current, data, smart: { ...current.smart, lastImport: undefined } },
+      removed ? removed + (removed === 1 ? ' untouched import removed.' : ' untouched imports removed.') : 'No untouched chores to undo.')
   }
 
   function closeCustomizer() {
@@ -187,7 +233,7 @@ export function App() {
     const data = { ...state, ...Object.fromEntries(collections.map(key => [key, unassign(state[key] as RecordItem[])])),
       categories: categories.filter(row => row.id !== category.id), routines: unassign(routines) }
     const dashboard = { ...preferences, widgets: unassign(preferences.widgets) }
-    if (writeSnapshot({ version: 3, data, dashboard }, 'Category deleted.')) {
+    if (writeSnapshot({ ...snapshotRef.current, data, dashboard }, 'Category deleted.')) {
       setCategoryEditor(undefined)
       setPantryFilter('all')
     }
@@ -205,17 +251,18 @@ export function App() {
 
   const categoryFor = (item: { categoryId?: string }) => categories.find(category => category.id === item.categoryId)
   const tasks = scheduled.flatMap(collection => state[collection].filter(isActive).map(task => ({ collection, task })))
-  const due = tasks.filter(({ task }) => dueDate(task) <= today).sort((a, b) => dueDate(a.task).localeCompare(dueDate(b.task)))
+  const due = tasks.filter(({ task }) => !onDemand(task) && dueDate(task) <= today).sort((a, b) => dueDate(a.task).localeCompare(dueDate(b.task)))
   const low = state.pantry.filter(isLowStock)
   const suggestions = suggestedItems(state.pantry, state.groceries)
   const filteredPantry = state.pantry.filter(item => pantryFilter === 'all' || (pantryFilter === 'favorites' ? item.favorite :
     pantryFilter === 'uncategorized' ? !item.categoryId : item.categoryId === pantryFilter)).sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite))
   const dated = [
-    ...tasks.map(({ collection, task }) => ({ collection, item: task, date: dueDate(task), time: '' })),
+    ...tasks.filter(({ task }) => !onDemand(task)).map(({ collection, task }) => ({ collection, item: task, date: dueDate(task), time: '' })),
     ...state.calendar.map(item => ({ collection: 'calendar' as const, item, date: item.date, time: item.time })),
   ].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
   const upcoming = dated.filter(entry => entry.date > today || (entry.date === today && entry.collection === 'calendar'))
   const activePanel = taskPanel && state[taskPanel.collection].find(row => row.id === taskPanel.id)
+  const existingForSetup = scheduled.flatMap(key => state[key])
 
   function actOnTask(collection: ScheduledCollection, task: Schedule, action: TaskAction | 'undo', until?: string) {
     const current = snapshotRef.current.data[collection].find(row => row.id === task.id)
@@ -223,7 +270,7 @@ export function App() {
     const next = action === 'undo' ? undoTask(task) : applyTaskAction(task, action, today, until)
     if (task === next) return false
     const message = action === 'complete'
-      ? task.name + (isActive(next) ? ' done. Next date scheduled.' : ' done.')
+      ? task.name + (isActive(next) && !onDemand(next) ? ' done. Next date scheduled.' : ' done.')
       : action === 'skip' ? 'Occurrence skipped.' : action === 'undo' ? 'Last action undone.' : 'Task snoozed.'
     return save(collection, next, message)
   }
@@ -245,11 +292,16 @@ export function App() {
   const leading = (first.getDay() + 6) % 7
   const monthSize = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
 
-  function scheduleRows(collection: typeof scheduled[number]) {
-    return [...state[collection]].sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || dueDate(a).localeCompare(dueDate(b))).map(task =>
+  function scheduleRows(collection: ScheduledCollection) {
+    const query = choreSearch.trim().toLocaleLowerCase()
+    const rows = state[collection].filter(task => collection !== 'chores' || !query ||
+      [task.name, task.notes, categoryFor(task)?.name, templateById(task.plan?.templateId)?.category].some(text => text?.toLocaleLowerCase().includes(query)))
+    return rows.sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || dueDate(a).localeCompare(dueDate(b))).map(task =>
       <TaskRow key={task.id} task={task} today={today} edit={() => setEditor({ collection, item: task })}
         done={() => complete(collection, task)} category={categoryFor(task)} activity={() => setTaskPanel({ collection, id: task.id })} />)
   }
+
+  const choreRows = page === 'chores' ? scheduleRows('chores') : []
 
   function addToShopping(item: Pantry, listId?: string) {
     if (!state.lists.length) { setEditor({ collection: 'lists' }); setNotice('Create a shopping list first.'); return }
@@ -291,10 +343,25 @@ export function App() {
       {page !== 'dashboard' && <div className="topline"><span>{navigation.find(item => item.id === page)?.label}</span><span><CalendarDays size={16} />{formatDay(today, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>}
       {storageError && <p className="message error" role="alert">{storageError}</p>}
       <div aria-live="polite">{notice && <div className={'message flex items-center justify-between gap-3' + (page === 'dashboard' ? ' command-notice' : '')}>{notice}<button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice('')}><X size={17} /></button></div>}</div>
-      {page !== 'dashboard' && <header className="page-head"><h1>{navigation.find(item => item.id === page)?.label}</h1><p>{subtitles[page]}</p></header>}
-      {page === 'dashboard' && <Dashboard state={state} today={today} preferences={preferences} due={due} upcoming={upcoming}
-        go={go} edit={(collection, item) => setEditor({ collection, item })} complete={complete}
-        activity={(collection, task) => setTaskPanel({ collection, id: task.id })} addChore={() => setEditor({ collection: 'chores' })} customize={() => setCustomizing(true)} />}
+      {page !== 'dashboard' && <header className="page-head"><h1>{navigation.find(item => item.id === page)?.label}</h1>{subtitles[page] && <p>{subtitles[page]}</p>}</header>}
+      {page === 'dashboard' && <>
+        {!readError.current && !smart.setupDismissed && !state.chores.length && <StartHere start={() => go('setup')}
+          dismiss={() => saveSmart({ setupDismissed: true }, 'Setup is available under More.')} />}
+        <SmartShortcuts today={() => go('today')} library={() => go('library')} progress={smart.progress.enabled ? () => go('progress') : undefined} />
+        <Dashboard state={state} today={today} preferences={preferences} due={due} upcoming={upcoming}
+          go={go} edit={(collection, item) => setEditor({ collection, item })} complete={complete}
+          activity={(collection, task) => setTaskPanel({ collection, id: task.id })}
+          addChore={() => setEditor({ collection: 'chores' })} customize={() => setCustomizing(true)} />
+      </>}
+      {page === 'setup' && <SetupWizard existing={existingForSetup} saved={smart.answers} initialPlanner={smart.planner} today={today}
+        finish={finishSetup} cancel={() => go('dashboard')} />}
+      {page === 'library' && <ChoreLibrary existing={existingForSetup} today={today} setup={() => go('setup')} add={row => finishSetup([row])} />}
+      {page === 'today' && <TodayView entries={tasks} today={today} settings={smart.planner}
+        saveSettings={planner => saveSmart({ planner }, 'Scheduling preferences saved.')}
+        complete={({ collection, task }) => complete(collection, task)} edit={({ collection, task }) => setEditor({ collection, item: task })}
+        activity={({ collection, task }) => setTaskPanel({ collection, id: task.id })} add={() => setEditor({ collection: 'chores' })} />}
+      {page === 'progress' && <ProgressView chores={state.chores} today={today} smart={smart}
+        save={progress => saveSmart({ progress }, 'Progress preferences saved.')} settings={() => go('today')} />}
       {page === 'routines' && <>
         <div className="section-action"><Add onClick={() => setRoutineEditor('new')}>New routine</Add></div>
         <div className="dashboard-grid">{routines.map(routine =>
@@ -310,7 +377,17 @@ export function App() {
           <div className="record-info"><CategoryTag category={category} /></div><EditButton name={category.name} action={() => setCategoryEditor(category)} />
         </div>) : <Empty>Add a category to group chores, pantry items, and other household records.</Empty>}
       </Panel>}
-      {page === 'chores' && <Panel heading="Chore schedule" icon={<ClipboardList />} action={<Add onClick={() => setEditor({ collection: 'chores' })}>Add chore</Add>}>{state.chores.length ? scheduleRows('chores') : <Empty>Add a chore to start your schedule.</Empty>}</Panel>}
+      {page === 'chores' && <>
+        <div className="chore-tools">
+          <TaskSearch value={choreSearch} update={setChoreSearch} />
+          <button className="secondary" onClick={() => go('library')}><BookOpen size={17} /> Chore library</button>
+          <button className="secondary" onClick={() => go('setup')}><Sparkles size={17} /> Guided setup</button>
+          {smart.lastImport && <button className="text-button" onClick={undoSetupImport}>Undo last import</button>}
+        </div>
+        <Panel heading="Chore schedule" icon={<ClipboardList />} action={<Add onClick={() => setEditor({ collection: 'chores' })}>Add chore</Add>}>
+          {state.chores.length ? (choreRows.length ? choreRows : <Empty>No chores match your search.</Empty>) : <Empty>Add a chore or choose tasks from the library.</Empty>}
+        </Panel>
+      </>}
       {page === 'maintenance' && <Panel heading="Maintenance schedule" icon={<Wrench />} action={<Add onClick={() => setEditor({ collection: 'maintenance' })}>Add task</Add>}>{state.maintenance.length ? scheduleRows('maintenance') : <Empty>No maintenance tasks scheduled.</Empty>}</Panel>}
       {page === 'dog' && <div className="dashboard-grid">
         <Panel heading="Medication" icon={<PawPrint />} action={<Add onClick={() => setEditor({ collection: 'medication' })}>Add medication</Add>}>{state.medication.length ? scheduleRows('medication') : <Empty>No medications recorded.</Empty>}</Panel>
@@ -374,16 +451,17 @@ export function App() {
         </Panel>
       </div>}
       {page === 'backup' && <div className="dashboard-grid">
-        <Panel heading="Export data" icon={<Download />}><div className="backup-body"><p>Save your household records and dashboard preferences as a JSON file.</p><button className="primary" onClick={download} disabled={!!readError.current}><Download size={18} /> Download backup</button></div></Panel>
+        <Panel heading="Export data" icon={<Download />}><div className="backup-body"><p>Save your household records, dashboard, and planning preferences as a JSON file.</p><button className="primary" onClick={download} disabled={!!readError.current}><Download size={18} /> Download backup</button></div></Panel>
         <Panel heading="Restore data" icon={<Upload />}><div className="backup-body"><p>Import a HomeBase backup. Review the file before replacing records on this device.</p>
           <input type="file" ref={fileInput} hidden accept=".json,application/json" onChange={async event => {
             const file = event.currentTarget.files?.[0]
             event.currentTarget.value = ''
             if (!file) return
-            try { setPendingRestore(readBackup(await file.text(), snapshotRef.current.dashboard)); setNotice('') }
+            try { setPendingRestore(readBackup(await file.text(), snapshotRef.current.dashboard, snapshotRef.current.smart)); setNotice('') }
             catch (error) { setNotice(error instanceof SyntaxError ? 'This file is not valid JSON.' : error instanceof Error ? error.message : 'Unable to read the backup.') }
           }} />
-          <button className="secondary" onClick={() => fileInput.current?.click()}><Upload size={18} /> Choose backup</button></div></Panel>
+          <button className="secondary" onClick={() => fileInput.current?.click()}><Upload size={18} /> Choose backup</button>
+          {recovery && <button className="secondary" onClick={() => setPendingRestore(recovery)}>Review saved older copy</button>}</div></Panel>
       </div>}
       {page !== 'dashboard' && <footer>HomeBase · Your household planner</footer>}
     </main>
@@ -412,7 +490,7 @@ export function App() {
       }} undo={() => { if (actOnTask(taskPanel.collection, activePanel, 'undo')) setTaskPanel(undefined) }} />
     </Dialog>}
     {pendingRestore && <Dialog heading="Restore this backup?" close={() => setPendingRestore(undefined)}>
-      <p>This replaces all HomeBase records on this device. A V3 backup also restores its dashboard preferences.</p>
+      <p>This replaces all HomeBase records on this device. V3 backups include the dashboard. V4 backups also restore planning and progress settings.</p>
       {storageError && <p className="message error" role="alert">{storageError}</p>}
       <div className="dialog-actions"><button className="secondary" onClick={() => setPendingRestore(undefined)}>Cancel</button><button className="primary" onClick={() => {
         if (writeSnapshot(pendingRestore, 'Backup restored.', true)) setPendingRestore(undefined)
@@ -451,13 +529,13 @@ function TaskRow({ task, today, edit, done, category, activity }: {
 }) {
   const active = isActive(task)
   const date = dueDate(task)
-  const status = active ? date < today ? 'Overdue' : date === today ? 'Today' :
+  const status = onDemand(task) ? (task.lastDone === today ? 'Logged today' : '') : active ? date < today ? 'Overdue' : date === today ? 'Today' :
     (task.snoozedUntil ? 'Snoozed to ' : '') + formatDay(date) : task.skipped ? 'Skipped' : 'Completed'
   return <div className="record-row schedule-row">
     <TaskCheck task={task} today={today} complete={done} />
     <div className="record-info"><strong>{task.name}</strong><small>{ruleDescription(task)}{task.lastDone && ' · Last done ' + formatDay(task.lastDone)}</small>
-      {task.notes && <small>{task.notes}</small>}<CategoryTag category={category} />
-      <span className={'pill ' + (active && date < today ? 'warning' : '')}>{status}</span>
+      {task.notes && <small>{task.notes}</small>}{task.plan && <small>{task.plan.minutes} min{task.plan.priority === 'critical' ? ' · Time-sensitive' : ''}</small>}<CategoryTag category={category} />
+      {status && <span className={'pill ' + (active && !onDemand(task) && date < today ? 'warning' : '')}>{status}</span>}
     </div>
     <EditButton name={task.name} action={edit} />
     <button className="icon-button" aria-label={'Activity for ' + task.name} onClick={activity}><Ellipsis size={19} /></button>
@@ -480,11 +558,13 @@ function Dialog({ heading, close, children, className }: { heading: string; clos
 function RecordEditor({ editor, today, categories, close, save, remove }: { editor: Editor; today: string; categories: Category[]; close: () => void; save: (item: RecordItem) => boolean; remove: (item: RecordItem) => void }) {
   const { collection, item } = editor
   const isSchedule = scheduled.some(key => key === collection)
-  const task = item as Schedule | undefined
+  const task = isSchedule ? item as Schedule | undefined : undefined
+  const template = templateById(task?.plan?.templateId)
   const pantry = item as Pantry | undefined
   const entry = item as Event | undefined
   const datedItem = item as (Event | Schedule) | undefined
   const initialRule = task ? taskRule(task) : { mode: collection === 'chores' ? 'weekly' as const : 'once' as const }
+  const [critical, setCritical] = useState(task?.plan?.priority === 'critical')
   const [mode, setMode] = useState<RecurrenceMode>(initialRule.mode)
   const [error, setError] = useState('')
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -514,7 +594,14 @@ function RecordEditor({ editor, today, categories, close, save, remove }: { edit
       }
       const preserveLegacy = task && !task.rule && initialRule.mode === mode && initialRule.days === nextRule.days
       const reopen = data.has('reopen')
-      record = { ...task, ...base, date, notes, interval: nextRule.days ?? 0, rule: preserveLegacy ? undefined : nextRule,
+      const minutes = read('minutes')
+      const flexible = data.has('flexible') && !critical
+      const plan = task?.plan || minutes || flexible || critical ? {
+        ...task?.plan, minutes: minutes ? Number(minutes) : estimatedMinutes(task ?? { ...base, date, interval: 0, notes, lastDone: '' }),
+        priority: critical ? ('critical' as const) : task?.plan?.priority === 'critical' ? ('normal' as const) : task?.plan?.priority ?? ('normal' as const), flexible,
+        cadence: task && onDemand(task) && mode !== 'once' ? undefined : task?.plan?.cadence,
+      } : undefined
+      record = { ...task, ...base, date, notes, plan, interval: nextRule.days ?? 0, rule: preserveLegacy ? undefined : nextRule,
         lastDone: reopen ? '' : task?.lastDone ?? '', skipped: reopen || mode !== 'once' ? undefined : task?.skipped,
         snoozedUntil: task?.date === date && !reopen ? task?.snoozedUntil : undefined }
     }
@@ -529,6 +616,14 @@ function RecordEditor({ editor, today, categories, close, save, remove }: { edit
       {(isSchedule || collection === 'calendar') && <label>{isSchedule ? 'Due date' : 'Date'}<input name="date" type="date" required min="1900-01-01" max="9900-12-31" defaultValue={datedItem?.date || editor.date || today} /></label>}
       <CategorySelect categories={categories} value={item?.categoryId} />
       {isSchedule && <>
+        <label>Estimated active minutes<input name="minutes" type="number" min="1" max="600" step="1" placeholder="10 if unspecified" defaultValue={task?.plan?.minutes} /></label>
+        {collection === 'chores' && !(task && onDemand(task)) && <>
+          <label className="grocery"><input type="checkbox" checked={critical} disabled={template?.priority === 'critical'}
+            onChange={event => setCritical(event.target.checked)} /> Time-sensitive task</label>
+        </>}
+        {collection === 'chores' && !critical && !(task && onDemand(task)) &&
+          <label className="grocery"><input name="flexible" type="checkbox" defaultChecked={task?.plan?.flexible} /> Flexible for weekly planning</label>}
+        {task && onDemand(task) && <p className="smart-hint">This task is currently tracked when needed.</p>}
         <label>Repeat<select name="repeat" value={mode} onChange={event => setMode(event.target.value as RecurrenceMode)}>
           {Object.entries(recurrenceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
         </select></label>
@@ -551,6 +646,7 @@ function RecordEditor({ editor, today, categories, close, save, remove }: { edit
       </div><label>Unit (optional)<input name="unit" maxLength={40} placeholder="e.g. bags" defaultValue={pantry?.unit} /></label>
       <label>Expiration (optional)<input name="expires" type="date" min="1900-01-01" max="9900-12-31" defaultValue={pantry?.expires} /></label>
       <label className="grocery"><input name="favorite" type="checkbox" defaultChecked={pantry?.favorite} /> Favorite product</label></>}
+      {template && <details><summary>Template guidance</summary><TemplateDetails template={template} /></details>}
       {error && <p className="message error" role="alert">{error}</p>}
       <div className="dialog-actions">
         {item && <button type="button" className="danger" onClick={() => remove(item)}><Trash2 size={16} /> Delete</button>}
