@@ -1,8 +1,17 @@
-export type Schedule = { id: string; name: string; date: string; interval: number; notes: string; lastDone: string }
-export type Pantry = { id: string; name: string; quantity: number; threshold: number; unit: string }
-export type ShoppingList = { id: string; name: string }
-export type Grocery = { id: string; name: string; listId: string; done: boolean }
-export type Event = { id: string; name: string; date: string; time: string; notes: string }
+import type { Rule, TaskLog } from './recurrence'
+import type { CategoryColor, IconId } from './dashboard-preferences'
+
+export type NamedRecord = { id: string; name: string; categoryId?: string }
+export type Schedule = NamedRecord & { date: string; interval: number; notes: string; lastDone: string; rule?: Rule; snoozedUntil?: string; history?: TaskLog[]; skipped?: boolean }
+export type Pantry = NamedRecord & { quantity: number; threshold: number; unit: string; favorite?: boolean; expires?: string }
+export type ShoppingList = NamedRecord
+export type Grocery = NamedRecord & { listId: string; done: boolean }
+export type Event = NamedRecord & { date: string; time: string; notes: string }
+export type Routine = NamedRecord & { choreIds: string[]; checkoffs?: Record<string, string> }
+export type Category = NamedRecord & { color: CategoryColor; icon: IconId }
+export const scheduled = ['chores', 'medication', 'vet', 'maintenance'] as const
+export type ScheduledCollection = typeof scheduled[number]
+export const collections = [...scheduled, 'pantry', 'lists', 'groceries', 'calendar'] as const
 export type State = {
   version: 1
   chores: Schedule[]
@@ -13,8 +22,10 @@ export type State = {
   vet: Schedule[]
   calendar: Event[]
   maintenance: Schedule[]
+  routines?: Routine[]
+  categories?: Category[]
 }
-export type Collection = Exclude<keyof State, 'version'>
+export type Collection = typeof collections[number]
 export type RecordItem = State[Collection][number]
 export const storageKey = 'homebase-v1'
 
@@ -67,11 +78,11 @@ export function seed(): State {
   }
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
+export const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
-const isName = (value: unknown): value is string => typeof value === 'string' && !!value.trim()
+export const isName = (value: unknown): value is string => typeof value === 'string' && !!value.trim()
 const isQuantity = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
-const isDate = (value: unknown): value is string => {
+export const isDate = (value: unknown): value is string => {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const parsed = new Date(value + 'T12:00:00')
   return !Number.isNaN(parsed.getTime()) && dayKey(parsed) === value
@@ -79,7 +90,7 @@ const isDate = (value: unknown): value is string => {
 
 export function parseBackup(text: string): State {
   const data: unknown = JSON.parse(text)
-  if (!isObject(data) || data.version !== 1) throw new Error('Choose a HomeBase V1 JSON backup.')
+  if (!isObject(data) || data.version !== 1) throw new Error('Choose a HomeBase JSON backup from a supported version.')
   const schedule = (item: Record<string, unknown>) => isDate(item.date) &&
     isQuantity(item.interval) && Number.isInteger(item.interval) && item.interval <= 36500 &&
     typeof item.notes === 'string' && (item.lastDone === '' || isDate(item.lastDone))
@@ -107,10 +118,3 @@ export function parseBackup(text: string): State {
   }
   return validated
 }
-
-export function finishTask(task: Schedule, today = dayKey()): Schedule {
-  const base = task.date > today ? task.date : today
-  return { ...task, lastDone: today, date: task.interval ? offsetDay(base, task.interval) : task.date }
-}
-
-export const activeTask = (task: Schedule) => !!task.interval || !task.lastDone
