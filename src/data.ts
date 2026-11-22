@@ -1,8 +1,9 @@
+import type { ChorePlan } from './smart-plan'
 import type { Rule, TaskLog } from './recurrence'
 import type { CategoryColor, IconId } from './dashboard-preferences'
 
 export type NamedRecord = { id: string; name: string; categoryId?: string }
-export type Schedule = NamedRecord & { date: string; interval: number; notes: string; lastDone: string; rule?: Rule; snoozedUntil?: string; history?: TaskLog[]; skipped?: boolean }
+export type Schedule = NamedRecord & { date: string; interval: number; notes: string; lastDone: string; rule?: Rule; snoozedUntil?: string; history?: TaskLog[]; skipped?: boolean; plan?: ChorePlan }
 export type Pantry = NamedRecord & { quantity: number; threshold: number; unit: string; favorite?: boolean; expires?: string }
 export type ShoppingList = NamedRecord
 export type Grocery = NamedRecord & { listId: string; done: boolean }
