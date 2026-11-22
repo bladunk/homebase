@@ -4,6 +4,7 @@ import { CategoryIcon } from './dashboard'
 import { categoryColors, iconLabels, type CategoryColor, type IconId } from './dashboard-preferences'
 import { formatDay, offsetDay, type Category, type Pantry, type Routine, type Schedule } from './data'
 import { expirationStatus, isLowStock, quantityAfter } from './inventory'
+import { onDemand } from './smart-plan'
 import { canComplete, canUndo, dueDate, isActive, type TaskAction } from './recurrence'
 
 export function CategorySelect({ categories, value, name = 'categoryId' }: { categories: Category[]; value?: string; name?: string }) {
@@ -104,7 +105,7 @@ export function TaskActivity({ task, today, action, undo }: {
 }) {
   const [snooze, setSnooze] = useState(() => offsetDay(dueDate(task) > today ? dueDate(task) : today, 1))
   return <div className="task-activity">
-    {isActive(task) && <form onSubmit={event => { event.preventDefault(); action('snooze', snooze) }}>
+    {isActive(task) && !onDemand(task) && <form onSubmit={event => { event.preventDefault(); action('snooze', snooze) }}>
       <label>Snooze until<input type="date" required value={snooze} onChange={event => setSnooze(event.target.value)}
         min={offsetDay(dueDate(task) > today ? dueDate(task) : today, 1)} max="9900-12-31" /></label>
       <div className="task-actions">

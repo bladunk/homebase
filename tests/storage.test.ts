@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest'
+import { defaultSmart } from '../src/smart-plan'
 import { seed, storageKey } from '../src/data'
 import { defaultPreferences, preferencesKey } from '../src/dashboard-preferences'
-import { loadSnapshot, readBackup, v3Key, type Snapshot } from '../src/storage'
+import { loadSnapshot, readBackup, v3Key, v4Key, type Snapshot } from '../src/storage'
 
 it('reads V1 records and V2 preferences without rewriting existing keys', () => {
   const data = seed()
@@ -19,7 +20,7 @@ it('reads V1 records and V2 preferences without rewriting existing keys', () => 
   expect(disk.get(preferencesKey)).toBe(JSON.stringify(oldPreferences))
 })
 
-it('round-trips V3 data and defaults to the current layout for old imports', () => {
+it('migrates V3 and round-trips V4 data and defaults to the current layout for old imports', () => {
   const data = seed()
   data.categories = [{ id: 'kitchen', name: 'Kitchen', icon: 'coffee', color: 'brass' }]
   data.chores[0].categoryId = 'kitchen'
@@ -28,8 +29,15 @@ it('round-trips V3 data and defaults to the current layout for old imports', () 
   data.pantry[0].expires = '2026-12-01'
   data.pantry[0].favorite = true
   const dashboard = { ...defaultPreferences(), theme: 'grove' as const, widgets: [] }
-  const snapshot: Snapshot = { version: 3, data, dashboard }
+  const smart = defaultSmart()
+  const snapshot: Snapshot = { version: 4, data, dashboard, smart }
   expect(readBackup(JSON.stringify(snapshot), defaultPreferences())).toEqual(snapshot)
+  const v3 = JSON.stringify({ version: 3, data, dashboard })
+  const disk = new Map([[v3Key, v3]])
+  const migrated = loadSnapshot({ getItem: key => disk.get(key) ?? null })
+  expect(migrated.snapshot).toEqual(snapshot)
+  expect(disk.get(v3Key)).toBe(v3)
+  expect(disk.has(v4Key)).toBe(false)
   expect(readBackup(JSON.stringify(seed()), dashboard).dashboard).toEqual(dashboard)
 })
 
@@ -45,4 +53,5 @@ it('rejects malformed backups, broken references, and corrupt V3 storage', () =>
   const result = loadSnapshot({ getItem: key => disk.get(key) ?? null })
   expect(result.error).toContain('could not read')
   expect(disk.get(v3Key)).toBe('{broken')
+  expect(result.recovery?.data.chores).toHaveLength(seed().chores.length)
 })
