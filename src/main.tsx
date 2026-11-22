@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { ArrowUpRight, Box, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Download, House, Menu, PackageOpen, PawPrint, Pencil, Plus, ShoppingBasket, Sprout, Trash2, Upload, Wrench, X } from 'lucide-react'
+import { CalendarDays, Check, ClipboardList, ChevronLeft, ChevronRight, Download, House, Menu, PackageOpen, PawPrint, Pencil, Plus, ShoppingBasket, Trash2, Upload, Wrench, X } from 'lucide-react'
 import { activeTask, dayKey, finishTask, formatDay, offsetDay, parseBackup, seed, storageKey, type Collection, type Event, type Grocery, type Pantry, type RecordItem, type Schedule, type State } from './data'
+import { CategoryIcon, CustomizeDashboard, Dashboard } from './dashboard'
+import { defaultPreferences, loadPreferences, preferencesKey, themeOptions, type DashboardPreferences } from './dashboard-preferences'
 import './style.css'
+import './command-center.css'
 
 const navigation = [
   { id: 'dashboard', label: 'Overview', icon: House },
-  { id: 'chores', label: 'Chores', icon: ClipboardList },
-  { id: 'pantry', label: 'Pantry', icon: PackageOpen },
-  { id: 'shopping', label: 'Shopping', icon: ShoppingBasket },
-  { id: 'dog', label: 'Dog care', icon: PawPrint },
-  { id: 'calendar', label: 'Calendar', icon: CalendarDays },
-  { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+  { id: 'chores', label: 'Chores', widget: 'today' },
+  { id: 'pantry', label: 'Pantry', widget: 'pantry' },
+  { id: 'shopping', label: 'Shopping', widget: 'shopping' },
+  { id: 'dog', label: 'Dog care', widget: 'dog' },
+  { id: 'calendar', label: 'Calendar', widget: 'calendar' },
+  { id: 'maintenance', label: 'Maintenance', widget: 'maintenance' },
   { id: 'backup', label: 'Backup & restore', icon: Download },
 ] as const
 type Page = typeof navigation[number]['id']
@@ -37,11 +39,17 @@ function loadState() {
   }
 }
 
-function App() {
+export function App() {
   const [initial] = useState(loadState)
   const [state, setState] = useState(initial.data)
   const [notice, setNotice] = useState('')
   const [storageError, setStorageError] = useState(initial.error)
+  const [preferences, setPreferences] = useState(() => {
+    try { return loadPreferences(window.localStorage) }
+    catch { return defaultPreferences() }
+  })
+  const [customizing, setCustomizing] = useState(false)
+  const [preferenceError, setPreferenceError] = useState('')
   const [page, setPage] = useState<Page>('dashboard')
   const [menu, setMenu] = useState(false)
   const [editor, setEditor] = useState<Editor>()
@@ -77,6 +85,25 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeOptions[preferences.theme].swatches[0])
+  }, [preferences.theme])
+
+  function savePreferences(next: DashboardPreferences) {
+    try {
+      localStorage.setItem(preferencesKey, JSON.stringify(next))
+      setPreferences(next)
+      closeCustomizer()
+    } catch {
+      setPreferenceError('Dashboard preferences could not be saved. Check device storage and try again.')
+    }
+  }
+
+  function closeCustomizer() {
+    setCustomizing(false)
+    setPreferenceError('')
+  }
+
   function go(target: Page) {
     setPage(target)
     setMenu(false)
@@ -107,6 +134,10 @@ function App() {
     ...state.calendar.map(item => ({ collection: 'calendar' as const, item, date: item.date, time: item.time })),
   ].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
   const upcoming = dated.filter(entry => entry.date > today || (entry.date === today && entry.collection === 'calendar'))
+  function complete(collection: typeof scheduled[number], task: Schedule) {
+    return save(collection, finishTask(task, today), task.interval ? task.name + ' done. Next date scheduled.' : task.name + ' done.')
+  }
+
   const first = new Date(month + '-01T12:00:00')
   const leading = (first.getDay() + 6) % 7
   const monthSize = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
@@ -114,7 +145,7 @@ function App() {
   function scheduleRows(collection: typeof scheduled[number]) {
     return [...state[collection]].sort((a, b) => Number(activeTask(b)) - Number(activeTask(a)) || a.date.localeCompare(b.date)).map(task =>
       <TaskRow key={task.id} task={task} today={today} edit={() => setEditor({ collection, item: task })}
-        done={() => save(collection, finishTask(task, today), task.interval ? 'Completed. Next date scheduled.' : 'Marked complete.')} />)
+        done={() => complete(collection, task)} />)
   }
 
   function addToShopping(item: Pantry) {
@@ -137,43 +168,30 @@ function App() {
     setNotice('Backup downloaded.')
   }
 
-  return <div className="shell">
+  return <div className="shell" data-theme={preferences.theme}>
     <a className="skip" href="#content">Skip to content</a>
     <aside className={'sidebar ' + (menu ? 'expanded' : '')}>
       <div className="brand-bar">
-        <button className="brand" onClick={() => go('dashboard')}><span className="brand-icon"><House size={22} /></span><span>HomeBase<small>HOUSEHOLD PLANNER</small></span></button>
+        <button className="brand" onClick={() => go('dashboard')}><span className="brand-icon"><House size={22} /></span><span>HomeBase</span></button>
         <button className="icon-button menu-button" aria-label={menu ? 'Close navigation' : 'Open navigation'} aria-expanded={menu} aria-controls="navigation" onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button>
       </div>
-      <nav id="navigation" aria-label="Main navigation">{navigation.map(({ id, label, icon: Icon }) =>
-        <button key={id} aria-current={page === id ? 'page' : undefined} onClick={() => go(id)}><Icon size={19} />{label}</button>)}</nav>
+      <nav id="navigation" aria-label="Main navigation">{navigation.map(item => {
+        const category = 'widget' in item ? preferences.widgets.find(widget => widget.id === item.widget) : undefined
+        const Icon = 'icon' in item ? item.icon : House
+        return <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
+          {category ? <CategoryIcon widget={category} /> : <Icon size={19} aria-hidden="true" />}{item.label}
+        </button>
+      })}</nav>
       <div className="sidebar-foot"><span className="status-dot" /> Stored on this device</div>
     </aside>
-    <main id="content" ref={main} tabIndex={-1}>
-      <div className="topline"><span>{navigation.find(item => item.id === page)?.label}</span><span><CalendarDays size={16} />{formatDay(today, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
+    <main id="content" className={page === 'dashboard' ? 'command-main' : undefined} ref={main} tabIndex={-1}>
+      {page !== 'dashboard' && <div className="topline"><span>{navigation.find(item => item.id === page)?.label}</span><span><CalendarDays size={16} />{formatDay(today, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>}
       {storageError && <p className="message error" role="alert">{storageError}</p>}
-      <div aria-live="polite">{notice && <div className="message flex items-center justify-between gap-3">{notice}<button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice('')}><X size={17} /></button></div>}</div>
+      <div aria-live="polite">{notice && <div className={'message flex items-center justify-between gap-3' + (page === 'dashboard' ? ' command-notice' : '')}>{notice}<button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice('')}><X size={17} /></button></div>}</div>
       {page !== 'dashboard' && <header className="page-head"><h1>{navigation.find(item => item.id === page)?.label}</h1><p>{subtitles[page]}</p></header>}
-      {page === 'dashboard' && <>
-        <header className="hero">
-          <div><span className="hero-label"><Sprout size={16} /> YOUR HOUSEHOLD</span><h1>Welcome home.</h1><p>See what’s due, what’s running low, and what’s coming up.</p>
-            <button className="primary hero-button" onClick={() => setEditor({ collection: 'chores' })}><Plus size={18} /> New chore</button></div>
-          <div className="hero-art" aria-hidden="true"><div className="hero-orbit"><House /></div><Sprout className="hero-sprout" /></div>
-        </header>
-        <div className="stats">
-          <Stat icon={<ClipboardList />} value={due.length} label="Due today or overdue" onClick={() => document.getElementById('due-tasks')?.focus()} />
-          <Stat icon={<Box />} value={low.length} label="Low-stock items" onClick={() => go('pantry')} />
-          <Stat icon={<ShoppingBasket />} value={state.groceries.filter(item => !item.done).length} label="Items to buy" onClick={() => go('shopping')} />
-        </div>
-        <div className="dashboard-grid">
-          <Panel id="due-tasks" heading="Needs attention" icon={<ClipboardList />} action={<button className="text-button" onClick={() => go('calendar')}>Calendar <ArrowUpRight size={15} /></button>}>
-            {due.length ? due.map(({ collection, task }) => <TaskRow key={collection + task.id} task={task} today={today} edit={() => setEditor({ collection, item: task })} done={() => save(collection, finishTask(task, today), 'Marked complete.')} />) : <Empty>Nothing is due today.</Empty>}
-          </Panel>
-          <Panel heading="Coming up" icon={<CalendarDays />}>
-            {upcoming.length ? upcoming.slice(0, 5).map(({ collection, date, item }) =>
-              <button className="agenda-row" key={collection + item.id} onClick={() => setEditor({ collection, item })}><span className="date-chip">{formatDay(date)}</span><span><strong>{item.name}</strong><small>{recordNames[collection]}</small></span></button>) : <Empty>No upcoming events or tasks.</Empty>}
-          </Panel>
-        </div>
-      </>}
+      {page === 'dashboard' && <Dashboard state={state} today={today} preferences={preferences} due={due} upcoming={upcoming}
+        go={go} edit={(collection, item) => setEditor({ collection, item })} complete={complete}
+        addChore={() => setEditor({ collection: 'chores' })} customize={() => setCustomizing(true)} />}
       {page === 'chores' && <Panel heading="Chore schedule" icon={<ClipboardList />} action={<Add onClick={() => setEditor({ collection: 'chores' })}>Add chore</Add>}>{state.chores.length ? scheduleRows('chores') : <Empty>Add a chore to start your schedule.</Empty>}</Panel>}
       {page === 'maintenance' && <Panel heading="Maintenance schedule" icon={<Wrench />} action={<Add onClick={() => setEditor({ collection: 'maintenance' })}>Add task</Add>}>{state.maintenance.length ? scheduleRows('maintenance') : <Empty>No maintenance tasks scheduled.</Empty>}</Panel>}
       {page === 'dog' && <div className="dashboard-grid">
@@ -240,8 +258,12 @@ function App() {
           }} />
           <button className="secondary" onClick={() => fileInput.current?.click()}><Upload size={18} /> Choose backup</button></div></Panel>
       </div>}
-      <footer>HomeBase · Your household planner</footer>
+      {page !== 'dashboard' && <footer>HomeBase · Your household planner</footer>}
     </main>
+    {customizing && <Dialog heading="Customize dashboard" close={closeCustomizer} className="customizer-dialog">
+      {preferenceError && <p className="message error" role="alert">{preferenceError}</p>}
+      <CustomizeDashboard preferences={preferences} onSave={savePreferences} onClose={closeCustomizer} />
+    </Dialog>}
     {editor && <RecordEditor key={editor.collection + (editor.item?.id || 'new')} editor={editor} today={today} close={() => setEditor(undefined)}
       save={item => {
         const saved = save(editor.collection, item)
@@ -259,12 +281,8 @@ function App() {
   </div>
 }
 
-function Panel({ id, heading, icon, action, children }: { id?: string; heading: string; icon: ReactNode; action?: ReactNode; children: ReactNode }) {
-  return <section className="panel" id={id} tabIndex={id ? -1 : undefined}><header><span className="panel-icon">{icon}</span><h2>{heading}</h2>{action && <div className="panel-action">{action}</div>}</header>{children}</section>
-}
-
-function Stat({ icon, label, value, onClick }: { icon: ReactNode; label: string; value: number; onClick: () => void }) {
-  return <button className="stat" onClick={onClick}><span className="stat-icon">{icon}</span><span><strong>{value}</strong><small>{label}</small></span><ArrowUpRight className="stat-arrow" size={17} /></button>
+function Panel({ heading, icon, action, children }: { heading: string; icon: ReactNode; action?: ReactNode; children: ReactNode }) {
+  return <section className="panel"><header><span className="panel-icon">{icon}</span><h2>{heading}</h2>{action && <div className="panel-action">{action}</div>}</header>{children}</section>
 }
 
 function Add({ children, onClick }: { children: ReactNode; onClick: () => void }) {
@@ -290,10 +308,14 @@ function TaskRow({ task, today, edit, done }: { task: Schedule; today: string; e
   </div>
 }
 
-function Dialog({ heading, close, children }: { heading: string; close: () => void; children: ReactNode }) {
+function Dialog({ heading, close, children, className }: { heading: string; close: () => void; children: ReactNode; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null)
-  useEffect(() => { ref.current?.showModal() }, [])
-  return <dialog ref={ref} aria-labelledby="dialog-title" onCancel={event => { event.preventDefault(); close() }}>
+  useEffect(() => {
+    const dialog = ref.current
+    dialog?.showModal()
+    return () => { dialog?.close() }
+  }, [])
+  return <dialog ref={ref} className={className} aria-labelledby="dialog-title" onCancel={event => { event.preventDefault(); close() }}>
     <header><h2 id="dialog-title">{heading}</h2><button className="icon-button" aria-label="Close dialog" onClick={close}><X size={21} /></button></header>
     {children}
   </dialog>
@@ -344,5 +366,3 @@ function RecordEditor({ editor, today, close, save, remove }: { editor: Editor; 
     </form>
   </Dialog>
 }
-
-createRoot(document.getElementById('root')!).render(<App />)

@@ -25,38 +25,18 @@
   .brand-bar { @apply flex items-center justify-between gap-3; }
   .brand { @apply inline-flex min-w-0 items-center gap-3 text-left text-xl font-bold tracking-tight; }
   .brand-icon { @apply grid size-11 shrink-0 place-items-center rounded-2xl bg-forest text-leaf; }
-  .brand small { @apply block text-xs font-semibold tracking-widest text-muted; }
   .sidebar nav { @apply hidden flex-col gap-1 pt-4; }
   .sidebar.expanded nav { @apply flex; }
   .sidebar nav button { @apply flex min-h-11 items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold text-muted; }
   .sidebar nav button:hover, .sidebar nav button[aria-current] { @apply bg-[#edf4e7] text-forest; }
   .sidebar-foot { @apply hidden items-center gap-2 text-sm text-muted; }
-  .status-dot { @apply size-2 rounded-full bg-[#588653]; }
   main { @apply mx-auto w-full max-w-[76rem] px-4 pb-8; outline: none; }
   .topline { @apply flex min-h-15 flex-wrap items-center justify-between gap-2 text-sm font-semibold text-muted; }
   .topline span:last-child { @apply flex items-center gap-2; }
-  .hero { @apply relative isolate overflow-hidden rounded-[1.5rem] bg-forest px-5 py-8 text-white; }
-  .hero::after { position: absolute; content: ''; z-index: -1; inset: 0; background: radial-gradient(ellipse at 94% 30%, #426a4d 0%, transparent 62%); }
-  .hero-label { @apply inline-flex items-center gap-2 text-xs font-bold tracking-widest text-leaf; }
   h1 { @apply text-4xl font-semibold tracking-tight; }
-  .hero h1 { @apply mt-3 text-[clamp(2.5rem,6vw,4.6rem)] leading-none; letter-spacing: -.065em; }
-  .hero p { @apply mt-4 max-w-[27rem] text-[#e0ebdd]; }
-  .hero .hero-button { @apply mt-6 bg-leaf text-forest; }
-  .hero .hero-button:hover { @apply bg-white; }
-  .hero-art { @apply pointer-events-none absolute right-[7%] top-1/2 hidden -translate-y-1/2; }
-  .hero-orbit { @apply grid size-39 rotate-[-12deg] place-items-center rounded-[2.1rem] border border-[#8eab83]/55 bg-[#b8dbaa]/10; box-shadow: 0 0 0 1.1rem #b8dbaa10; }
-  .hero-orbit svg { @apply size-21 text-leaf; stroke-width: 1.1; }
-  .hero-sprout { @apply absolute -bottom-5 -right-9 size-20 rotate-[18deg] text-[#b2d1a3]; stroke-width: 1; }
   .page-head { @apply mb-6 mt-2; }
   .page-head p { @apply mt-2 text-muted; }
-  .stats { @apply my-4 grid gap-3 sm:grid-cols-3; }
-  .stat { @apply relative flex min-w-0 items-center gap-3 rounded-2xl border border-line bg-white p-4 text-left; }
-  .stat:hover { @apply border-[#a6b9a2] bg-[#fcfdf9]; }
-  .stat-icon, .panel-icon { @apply grid shrink-0 place-items-center rounded-xl bg-[#edf4e7] text-forest; }
-  .stat-icon { @apply size-11; }
-  .stat strong { @apply block text-2xl leading-none tracking-tight; }
-  .stat small { @apply mt-1 block text-sm leading-tight text-muted; }
-  .stat-arrow { @apply ml-auto shrink-0 text-muted; }
+  .panel-icon { @apply grid shrink-0 place-items-center rounded-xl bg-[#edf4e7] text-forest; }
   .dashboard-grid { @apply grid items-start gap-4; }
   .panel { @apply min-w-0 overflow-hidden rounded-2xl border border-line bg-white; box-shadow: 0 2px 6px #20362a06; }
   .panel > header { @apply flex min-h-16 flex-wrap items-center gap-2 border-b border-line px-3 py-2; }
@@ -65,14 +45,11 @@
   .panel-icon svg { @apply size-[18px]; }
   .panel-action { @apply ml-auto max-w-full; }
   .record-row { @apply flex min-h-17 items-center gap-1.5 border-b border-line px-3 py-2; }
-  .record-row:last-child, .agenda-row:last-child { @apply border-b-0; }
+  .record-row:last-child { @apply border-b-0; }
   .record-info { @apply min-w-0 flex-1; overflow-wrap: anywhere; }
-  .record-info strong, .agenda-row strong { @apply block font-semibold; }
-  .record-info small, .agenda-row small { @apply block text-sm text-muted; }
+  .record-info strong { @apply block font-semibold; }
+  .record-info small { @apply block text-sm text-muted; }
   .row-actions { @apply flex shrink-0 items-center gap-1; }
-  .agenda-row { @apply flex min-h-17 w-full items-center gap-3 border-b border-line px-3 py-2 text-left hover:bg-surface; overflow-wrap: anywhere; }
-  .agenda-row small { @apply capitalize; }
-  .date-chip { @apply inline-flex min-h-9 min-w-16 shrink-0 items-center justify-center rounded-lg bg-[#edf4e7] px-2 text-sm font-semibold text-forest; }
   .pill { @apply shrink-0 rounded-full bg-[#edf4e7] px-2 py-1 text-xs font-semibold text-forest; }
   .pill.warning { @apply bg-[#fff1d9] text-[#714819]; }
   .primary, .secondary, .danger, .text-button, .icon-button, .check-button { @apply inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold; }
@@ -114,9 +91,6 @@
 }
 
 @media (min-width: 650px) {
-  .hero { padding: 2.25rem; }
-  .hero-art { display: block; }
-  .hero p { max-width: 65%; }
   .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   main { padding-inline: 1.5rem; }
 }
@@ -128,9 +102,7 @@
   .sidebar-foot { display: flex; margin-top: auto; padding: .75rem; }
   .sidebar .menu-button { display: none; }
   main { padding-inline: 2.25rem; }
-  .stats { margin-block: 1.25rem; }
-  .hero { padding: 2.75rem; }
-  .panel > header, .record-row, .agenda-row { padding-inline: 1rem; }
+  .panel > header, .record-row { padding-inline: 1rem; }
   .record-row { gap: .6rem; }
 }
 
