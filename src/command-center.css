@@ -134,9 +134,9 @@
   .shell .customizer-dialog h2 { font-family: ui-serif, Georgia, serif; font-weight: 600; }
 }
 
-body { background-color: #E9E3D4; }
+body, body:has(.shell[data-theme="dusk"]) { background-color: #1b2630; }
+body:has(.shell[data-theme="linen"]) { background-color: #E9E3D4; }
 body:has(.shell[data-theme="grove"]) { background-color: #d8e5d8; }
-body:has(.shell[data-theme="dusk"]) { background-color: #1b2630; }
 
 .command-main { padding-top: .75rem; padding-inline: max(.75rem, env(safe-area-inset-left)) max(.75rem, env(safe-area-inset-right)); }
 .command-header {
@@ -182,7 +182,6 @@ body:has(.shell[data-theme="dusk"]) { background-color: #1b2630; }
 }
 .widget-wide { grid-column: 1 / -1; }
 .widget-placeholder { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
-.command-widget:has(+ .widget-wide):nth-child(odd) { grid-column: 1 / -1; }
 
 [data-color="forest"] { --category: var(--forest-color); --category-bg: var(--forest-bg); --category-ink: var(--forest-ink); }
 [data-color="terracotta"] { --category: var(--terracotta-color); --category-bg: var(--terracotta-bg); --category-ink: var(--terracotta-ink); }
